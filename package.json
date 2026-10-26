@@ -1,0 +1,10 @@
+{
+  "name": "myexpense",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local-first expense tracker and bill splitter PWA. No dependencies.",
+  "scripts": {
+    "test": "node --test tests/core.test.js",
+    "serve": "python3 -m http.server 8080"
+  }
+}
