@@ -8,7 +8,7 @@
   const C = window.MyExpenseCore;
   const DB = window.MyExpenseDB;
   const ME = C.ME;
-  const APP_VERSION = '1.1.1';
+  const APP_VERSION = '1.1.3';
   const PREVIEW = !!window.MYEXPENSE_PREVIEW;
 
   let S = null; // in-memory copy of the database
@@ -150,6 +150,35 @@
       st: new Map(S.settlements.map((s) => [s.id, s])),
       bal: C.myBalances(S),
     };
+  }
+
+  const THEME_KEY = 'myexpense-theme';
+  function getTheme() {
+    try {
+      const t = localStorage.getItem(THEME_KEY);
+      return t === 'light' || t === 'dark' ? t : 'system';
+    } catch (err) {
+      return 'system';
+    }
+  }
+  function applyTheme(t) {
+    const root = document.documentElement;
+    if (t === 'light' || t === 'dark') root.setAttribute('data-theme', t);
+    else root.removeAttribute('data-theme');
+    const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    $$('meta[name="theme-color"]').forEach((m) => {
+      if (t === 'system') m.setAttribute('content', m.media.includes('dark') ? '#0b0f14' : '#f3f5f7');
+      else m.setAttribute('content', dark ? '#0b0f14' : '#f3f5f7');
+    });
+  }
+  function setTheme(t) {
+    try {
+      if (t === 'system') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, t);
+    } catch (err) {
+      /* storage blocked: still apply for this session */
+    }
+    applyTheme(t);
   }
 
   function sortedCategories(type) {
@@ -884,16 +913,17 @@
         .sort((a, b) => a.archived - b.archived || Math.abs(bal.perFriend.get(b.id) || 0) - Math.abs(bal.perFriend.get(a.id) || 0) || a.name.localeCompare(b.name));
       const archivedCount = S.friends.filter((f) => f.archived).length;
       content = `
-        <div class="panel-head"><span class="muted small">${plural(S.friends.length - archivedCount, 'friend')}</span><button type="button" class="btn ghost small" data-action="add-friend">${icon('plus')}Add friend</button></div>
-        ${list.length ? `<div class="rows">${list
+        <div class="panel-head"><span class="muted small">${plural(S.friends.length - archivedCount, 'friend')}</span><span class="head-btns"><button type="button" class="btn ghost small" data-action="import-contacts">${icon('contact')}Contacts</button><button type="button" class="btn ghost small" data-action="add-friend">${icon('plus')}Add</button></span></div>
+        ${list.length > 8 ? `<label class="search list-search">${icon('search')}<span class="sr-only">Search friends</span><input type="search" id="friend-q" placeholder="Search friends" autocomplete="off"></label>` : ''}
+        ${list.length ? `<div class="rows" id="friend-rows">${list
           .map((f) => {
             const b = balancePhrase(f.id, bal.perFriend.get(f.id) || 0);
-            return `<a class="row" href="#/split/friend/${encodeURIComponent(f.id)}">
+            return `<a class="row" href="#/split/friend/${encodeURIComponent(f.id)}" data-q="${esc((f.name + ' ' + (f.phone || '')).toLowerCase())}">
               ${avatar(f.id, f.name)}
               <span class="row-main"><span class="row-title">${esc(f.name)}${f.archived ? ' <span class="badge">Archived</span>' : ''}</span>${f.phone ? `<span class="row-sub">${esc(f.phone)}</span>` : ''}</span>
               <span class="row-amt small ${b.cls}">${esc(b.text)}</span></a>`;
           })
-          .join('')}</div>` : emptyState(NO_DATA, 'No friends added yet. Add the people you share bills with; they do not need an account.', `<button type="button" class="btn primary" data-action="add-friend">Add friend</button>`)}
+          .join('')}</div>` : emptyState(NO_DATA, 'No friends added yet. Add the people you share bills with; they do not need an account.', `<button type="button" class="btn primary" data-action="import-contacts">${icon('contact')}From contacts</button><button type="button" class="btn ghost" data-action="add-friend">Type a name</button>`)}
         ${archivedCount ? `<button type="button" class="btn ghost block" data-action="toggle-archived-friends">${ui.showArchivedFriends ? 'Hide' : 'Show'} ${plural(archivedCount, 'archived friend')}</button>` : ''}`;
     } else if (tab === 'groups') {
       const list = S.groups.filter((g) => ui.showArchivedGroups || !g.archived).sort((a, b) => a.archived - b.archived || a.name.localeCompare(b.name));
@@ -931,7 +961,18 @@
         ${[['friends', 'Friends'], ['groups', 'Groups'], ['activity', 'Activity']].map(([k, l]) => `<button type="button" role="tab" aria-selected="${tab === k}" class="tab" data-action="split-tab" data-tab="${k}">${l}</button>`).join('')}
       </div>
       <div class="tab-panel">${content}</div>`;
-    return { title: 'Split', body };
+    return {
+      title: 'Split',
+      body,
+      mount() {
+        const q = $('#friend-q');
+        if (q)
+          q.addEventListener('input', () => {
+            const t = q.value.trim().toLowerCase();
+            $$('#friend-rows .row').forEach((r) => (r.hidden = !!t && !r.dataset.q.includes(t)));
+          });
+      },
+    };
   }
 
   function initials(name) {
@@ -1156,8 +1197,8 @@
         const statusEl = $('#se-status', el);
 
         const renderPayer = () => {
-          const cands = candidates();
-          if (!cands.includes(f.payer)) f.payer = ME;
+          const cands = Array.from(new Set([ME, ...candidates().filter((id) => f.participants.includes(id)), f.payer]));
+          if (!candidates().includes(f.payer)) f.payer = ME;
           $('#se-payer', el).innerHTML = options(cands.map((id) => [id, id === ME ? 'You' : personName(id)]), f.payer);
           $('#pm-field', el).hidden = f.payer !== ME;
         };
@@ -1226,9 +1267,19 @@
           }
         };
 
+        let partQuery = '';
         const renderParts = () => {
-          const cands = candidates();
-          partsEl.innerHTML = cands
+          const all = candidates();
+          const big = all.length > 9;
+          const t = partQuery.trim().toLowerCase();
+          const chosen = all.filter((id) => id === ME || f.participants.includes(id));
+          let rest = all.filter((id) => id !== ME && !f.participants.includes(id));
+          if (t) rest = rest.filter((id) => personName(id).toLowerCase().includes(t) || ((idx.friend.get(id) || {}).phone || '').includes(t));
+          const hidden = big && !t ? Math.max(0, rest.length - 12) : 0;
+          if (hidden) rest = rest.slice(0, 12);
+          const cands = chosen.concat(rest);
+          const searchHtml = big ? `<label class="search part-search">${icon('search')}<span class="sr-only">Search friends</span><input type="search" id="se-q" placeholder="Search ${all.length - 1} friends" value="${esc(partQuery)}" autocomplete="off"></label>` : '';
+          partsEl.innerHTML = searchHtml + cands
             .map((id) => {
               const on = f.participants.includes(id);
               const archived = id !== ME && idx.friend.get(id) && idx.friend.get(id).archived;
@@ -1238,12 +1289,28 @@
                 <span class="part-share"></span>
               </div>`;
             })
-            .join('') + (f.groupId ? '' : `<button type="button" class="btn ghost small" id="se-add-friend">${icon('plus')}New friend</button>`);
+            .join('') + (hidden ? `<p class="hint">${hidden} more. Search to find them.</p>` : '') + (t && !rest.length ? '<p class="hint">No friend matches that search.</p>' : '') + (f.groupId ? '' : `<button type="button" class="btn ghost small" id="se-add-friend">${icon('plus')}New friend</button>`);
+          const sq = $('#se-q', partsEl);
+          if (sq)
+            sq.addEventListener('input', () => {
+              partQuery = sq.value;
+              const pos = sq.selectionStart;
+              renderParts();
+              const again = $('#se-q', partsEl);
+              again.focus();
+              try {
+                again.setSelectionRange(pos, pos);
+              } catch (err) {
+                /* ignore */
+              }
+            });
           $$('[data-part]', partsEl).forEach((cb) =>
             cb.addEventListener('change', () => {
               const id = cb.closest('.part-row').dataset.pid;
               if (cb.checked) f.participants.push(id);
               else f.participants = f.participants.filter((x) => x !== id);
+              if (cb.checked) partQuery = '';
+              renderPayer();
               renderParts();
             })
           );
@@ -1504,6 +1571,133 @@
   /* ---------------------------------------------------------------- friends */
 
   const contactsSupported = () => 'contacts' in navigator && typeof navigator.contacts.select === 'function' && window.isSecureContext;
+  const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = () => /Android/i.test(navigator.userAgent);
+
+  /** Key used to spot the same person twice: last 10 digits of the number, else the lower-case name. */
+  function contactKey(name, phone) {
+    const d = String(phone || '').replace(/\D/g, '');
+    if (d.length >= 7) return `p:${d.slice(-10)}`;
+    return `n:${String(name || '').trim().toLowerCase()}`;
+  }
+
+  function openContactsHelp() {
+    let body;
+    if (isIOS()) {
+      body = `<p>iPhone keeps contact access switched off for web apps until you turn it on once:</p>
+        <ol class="steps">
+          <li>Open the iPhone <b>Settings</b> app.</li>
+          <li>Go to <b>Apps → Safari → Advanced → Feature Flags</b>. On older iOS versions this is <b>Safari → Advanced → Experimental Features</b>.</li>
+          <li>Turn on <b>Contact Picker API</b>.</li>
+          <li>Fully close MyExpense (swipe it away) and open it again.</li>
+        </ol>
+        <p class="hint">Apple labels this experimental, so it may behave differently between iOS versions. If it still does not appear, add friends by typing their name.</p>`;
+    } else if (isAndroid()) {
+      body = `<p>Contact access works in <b>Google Chrome</b> on Android.</p>
+        <ol class="steps"><li>Open MyExpense from its home screen icon, or in Chrome (not Samsung Internet, Firefox or an in-app browser).</li><li>Make sure Chrome is up to date in the Play Store.</li></ol>`;
+    } else {
+      body = '<p>Contact access is only available on phones: Chrome on Android, or Safari on iPhone with the setting turned on. On a computer, add friends by typing their name.</p>';
+    }
+    openSheet({
+      title: 'Turn on contact access',
+      html: `<div class="sheet-text">${body}<p class="hint">MyExpense only receives the contacts you select, keeps them on this phone, and never uploads them.</p></div>
+        <div class="sheet-actions"><button type="button" class="btn ghost" data-close>Close</button><button type="button" class="btn primary" id="ch-manual">Type a friend instead</button></div>`,
+      onMount(el, api) {
+        $('#ch-manual', el).addEventListener('click', () => {
+          api.close();
+          setTimeout(() => openFriendForm(null), 120);
+        });
+      },
+    });
+  }
+
+  async function importContacts() {
+    if (!contactsSupported()) return openContactsHelp();
+    let picked;
+    try {
+      picked = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+    } catch (err) {
+      toast('Contacts could not be opened. Permission may have been denied.', 'error');
+      return;
+    }
+    if (!picked || !picked.length) return;
+    const existing = new Map();
+    for (const f of S.friends) existing.set(contactKey(f.name, f.phone), f);
+    const seen = new Set();
+    const rows = [];
+    for (const c of picked) {
+      const phone = (c.tel && c.tel.find((t) => t && t.trim())) || '';
+      const name = ((c.name && c.name.find((n) => n && n.trim())) || phone || '').trim();
+      if (!name) continue;
+      const key = contactKey(name, phone);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ name: name.slice(0, C.LIMITS.name), phone: phone.trim().slice(0, C.LIMITS.phone) || null, dup: existing.get(key) || null });
+    }
+    rows.sort((a, b) => (!!a.dup - !!b.dup) || a.name.localeCompare(b.name));
+    const fresh = rows.filter((r) => !r.dup).length;
+    if (!fresh) {
+      toast(rows.length ? 'Everyone you picked is already in your friends.' : 'The selected contacts had no name or number.');
+      return;
+    }
+    openSheet({
+      title: `Add ${plural(fresh, 'friend')}`,
+      html: `<div class="import-tools">
+          ${rows.length > 8 ? `<label class="search">${icon('search')}<span class="sr-only">Search contacts</span><input type="search" id="ci-q" placeholder="Search name or number" autocomplete="off"></label>` : ''}
+          <div class="import-bar"><span id="ci-count"></span><span><button type="button" class="link" id="ci-all">Select all</button> <button type="button" class="link" id="ci-none">None</button></span></div>
+        </div>
+        <div class="parts" id="ci-list">${rows
+          .map((r, i) => `<div class="part-row" data-q="${esc((r.name + ' ' + (r.phone || '')).toLowerCase())}">
+            <label class="check">${r.dup ? '<input type="checkbox" disabled checked>' : `<input type="checkbox" data-i="${i}" checked>`}
+            <span>${esc(r.name)}${r.phone ? `<small class="muted"> ${esc(r.phone)}</small>` : ''}</span></label>
+            ${r.dup ? '<span class="badge">Added</span>' : ''}</div>`)
+          .join('')}</div>
+        <div class="sheet-actions"><button type="button" class="btn ghost" data-close>Cancel</button><button type="button" class="btn primary" id="ci-add"></button></div>`,
+      onMount(el, api) {
+        const boxes = () => $$('input[data-i]', el);
+        const update = () => {
+          const n = boxes().filter((b) => b.checked).length;
+          $('#ci-count', el).textContent = `${n} of ${fresh} selected`;
+          const btn = $('#ci-add', el);
+          btn.textContent = n ? `Add ${plural(n, 'friend')}` : 'Select contacts';
+          btn.disabled = !n;
+        };
+        el.addEventListener('change', (e) => {
+          if (e.target.matches('input[data-i]')) update();
+        });
+        const visible = (b) => !b.closest('.part-row').hidden;
+        $('#ci-all', el).addEventListener('click', () => {
+          boxes().forEach((b) => visible(b) && (b.checked = true));
+          update();
+        });
+        $('#ci-none', el).addEventListener('click', () => {
+          boxes().forEach((b) => visible(b) && (b.checked = false));
+          update();
+        });
+        const q = $('#ci-q', el);
+        if (q)
+          q.addEventListener('input', () => {
+            const t = q.value.trim().toLowerCase();
+            $$('#ci-list .part-row', el).forEach((r) => (r.hidden = !!t && !r.dataset.q.includes(t)));
+          });
+        update();
+        $('#ci-add', el).addEventListener('click', async () => {
+          const now = C.nowISO();
+          const ops = boxes()
+            .filter((b) => b.checked)
+            .map((b) => {
+              const r = rows[Number(b.dataset.i)];
+              return { store: 'friends', put: { id: C.uid('fr'), name: r.name, phone: r.phone, notes: null, archived: false, createdAt: now, updatedAt: now } };
+            })
+            .filter((op) => C.validateFriend(op.put).length === 0);
+          if (!ops.length) return;
+          await persist(ops);
+          api.close();
+          toast(`${plural(ops.length, 'friend')} added from contacts.`);
+        });
+      },
+    });
+  }
 
   function friendRefs(id) {
     const ses = S.sharedExpenses.filter((s) => s.payerPersonId === id || s.participantShares.some((p) => p.personId === id)).length;
@@ -1518,7 +1712,7 @@
       html: `<form id="frf" class="form" novalidate>
         ${!fr ? (contactsSupported()
           ? `<button type="button" class="btn ghost block" id="fr-pick">${icon('contact')}Choose from contacts</button><p class="hint">Your phone shows its own contact picker. Only the name and number you pick are saved on this device. Nothing is uploaded.</p>`
-          : `<p class="hint">Picking from contacts is not available in this browser, so type the details below. (On Android, Chrome supports a contact picker; iPhone browsers currently do not.)</p>`) : ''}
+          : `<button type="button" class="btn ghost block" id="fr-help">${icon('contact')}Choose from contacts</button><p class="hint">Contact access is off in this browser. Tap above to see how to turn it on, or type the details below.</p>`) : ''}
         <label class="field"><span>Name</span><input id="fr-name" name="name" maxlength="${C.LIMITS.name}" value="${esc(fr ? fr.name : '')}" autocomplete="off" required></label>
         <label class="field"><span>Phone <em>optional</em></span><input name="phone" type="tel" maxlength="${C.LIMITS.phone}" value="${esc(fr && fr.phone ? fr.phone : '')}" autocomplete="off"></label>
         <label class="field"><span>Notes <em>optional</em></span><input name="notes" maxlength="${C.LIMITS.notes}" value="${esc(fr && fr.notes ? fr.notes : '')}" autocomplete="off"></label>
@@ -1530,6 +1724,12 @@
       </form>`,
       onMount(el, api) {
         const form = $('#frf', el);
+        const help = $('#fr-help', el);
+        if (help)
+          help.addEventListener('click', () => {
+            api.close();
+            setTimeout(openContactsHelp, 120);
+          });
         const pick = $('#fr-pick', el);
         if (pick)
           pick.addEventListener('click', async () => {
@@ -1631,6 +1831,7 @@
       html: `<form id="grf" class="form" novalidate>
         <label class="field"><span>Group name</span><input id="gr-name" name="name" maxlength="${C.LIMITS.name}" value="${esc(g ? g.name : '')}" placeholder="Goa Trip, Flat Expenses" autocomplete="off"></label>
         <fieldset class="field"><legend>Members <em>you are always included</em></legend>
+          ${list().length > 8 ? `<label class="search part-search">${icon('search')}<span class="sr-only">Search friends</span><input type="search" id="gr-q" placeholder="Search friends" autocomplete="off"></label>` : ''}
           <div class="parts" id="gr-members">${list().length ? list().map((id) => `<div class="part-row"><label class="check"><input type="checkbox" value="${esc(id)}" ${members.has(id) ? 'checked' : ''}><span>${esc(personName(id))}</span></label></div>`).join('') : '<p class="muted small">No friends yet.</p>'}</div>
           <button type="button" class="btn ghost small" id="gr-add-friend">${icon('plus')}New friend</button>
         </fieldset>
@@ -1642,6 +1843,12 @@
       </form>`,
       onMount(el, api) {
         const form = $('#grf', el);
+        const gq = $('#gr-q', el);
+        if (gq)
+          gq.addEventListener('input', () => {
+            const t = gq.value.trim().toLowerCase();
+            $$('#gr-members .part-row', el).forEach((r) => (r.hidden = !!t && !r.textContent.toLowerCase().includes(t)));
+          });
         $('#gr-add-friend', el).addEventListener('click', () =>
           openFriendForm(null, (fr) => {
             const box = $('#gr-members', el);
@@ -1914,7 +2121,15 @@
     const counts = C.countRecords(S);
     const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
     const swReady = 'serviceWorker' in navigator && !!navigator.serviceWorker.controller;
+    const theme = getTheme();
     const body = `
+      <section class="panel">
+        <h2 class="panel-title">Appearance</h2>
+        <div class="seg theme-seg" role="radiogroup" aria-label="Theme">
+          ${[['system', '📱 System'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([k, l]) => `<label class="seg-opt"><input type="radio" name="theme" value="${k}" ${theme === k ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+        </div>
+        <p class="hint" style="margin-bottom:0">System follows your phone’s light or dark mode. Saved on this device only.</p>
+      </section>
       <section class="panel">
         <h2 class="panel-title">Budget</h2>
         <ul class="plain">
@@ -1976,6 +2191,12 @@
       back: '#/home',
       body,
       mount() {
+        $$('input[name=theme]').forEach((r) =>
+          r.addEventListener('change', () => {
+            setTheme(r.value);
+            toast(r.value === 'system' ? 'Theme now follows your phone.' : `${r.value === 'dark' ? 'Dark' : 'Light'} theme on.`);
+          })
+        );
         const form = $('#set-form');
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
@@ -2414,6 +2635,7 @@
       if (st) openSettlementForm(st);
     },
     'add-friend': () => openFriendForm(null),
+    'import-contacts': () => importContacts(),
     'edit-friend': (el) => {
       const f = idx.friend.get(el.dataset.id);
       if (f) openFriendForm(f);
@@ -2641,6 +2863,7 @@
   });
 
   async function boot() {
+    applyTheme(getTheme());
     setupPWA();
     try {
       const r = await withTimeout(DB.loadAll(), 12000, 'Storage did not respond in time. This can happen right after an iOS update or when storage is full.');
