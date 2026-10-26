@@ -176,13 +176,15 @@ Editing or deleting a shared expense or payment recalculates every affected bala
 
 ## 9. Contacts
 
-Phone contact access in a web app depends on the browser:
+Web apps cannot silently read a phone's whole address book. Instead the phone shows its own contact picker, you select people (as many as you like, including everyone), and MyExpense receives only those names and numbers. They are saved on the phone only and never uploaded.
 
-- **Android, Chrome**: supported through the Contact Picker API. Tap Choose from contacts on the Add friend screen. Android shows its own picker; MyExpense receives only the one name and number you pick, never the address book, and stores it only on the phone.
-- **iPhone, Safari**: the Contact Picker API is not enabled by default, so the button is not shown. Type the name and (optionally) the number instead.
-- Permission is only requested when you tap the button. If it is denied or unsupported, manual entry always works.
+- **Split → Friends → Contacts** opens the picker with multi-select. A preview then lists everyone you picked, removes duplicates (same last 10 digits of the number), marks people who are already friends, and lets you search, select all or none, then add in one go.
+- **Android, Chrome**: works out of the box.
+- **iPhone**: turn it on once in the Settings app: Apps, Safari, Advanced, Feature Flags (older iOS: Safari, Advanced, Experimental Features), switch on **Contact Picker API**, then fully close and reopen MyExpense. Apple marks this as experimental, so behaviour can vary between iOS versions. The app shows these steps if the picker is not available.
+- Manual entry always works.
+- With many friends, the Split, group and friend lists all have search, and the split form shows the people already in the bill first.
 
-If full address book access on iPhone becomes a hard requirement, it needs a native or hybrid wrapper (for example Capacitor with a contacts plugin), which in turn needs either App Store distribution or the Apple developer sideloading route. That is a scope change from this PWA.
+If you ever need automatic, continuous access to the full address book (no picker), that requires a native app wrapper such as Capacitor. Android can be sideloaded as an APK; iPhone needs Xcode and an Apple developer account. That is a different project from this PWA.
 
 ## 10. Privacy and security notes
 
