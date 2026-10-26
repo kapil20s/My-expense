@@ -5,7 +5,7 @@
  *
  * When you change any app file, bump CACHE_VERSION so phones pick up the update.
  */
-const CACHE_VERSION = 'myexpense-v1.0.0';
+const CACHE_VERSION = 'myexpense-v1.1.1';
 const SHELL = [
   './',
   './index.html',
