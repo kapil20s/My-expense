@@ -586,3 +586,16 @@ table.mini th { color: var(--muted); font-weight: 700; font-size: 12px; }
 .no-data > span { font-size: 26px; line-height: 1; }
 .no-data strong { display: block; font-size: 14.5px; }
 .no-data small { display: block; font-size: 13px; color: var(--muted); }
+:root[data-theme="dark"] .qa-ic.settle { background: #2a1f4a; color: #c4b5fd; }
+:root[data-theme="dark"] .q-ic.settle { color: #c4b5fd; }
+.theme-seg .seg-opt span { font-size: 13.5px; }
+.head-btns { display: flex; gap: 6px; }
+.list-search { display: block; margin: 0 0 10px; }
+.part-search { display: block; margin: 10px 0 6px; }
+.part-search input { background: var(--surface) !important; }
+.import-tools { margin: 0 0 8px; }
+.import-bar { display: flex; justify-content: space-between; align-items: center; margin: 10px 2px 8px; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+.import-bar .link { margin-left: 10px; }
+.steps { margin: 6px 0 12px; padding-left: 20px; }
+.steps li { margin: 0 0 8px; }
+.check small { font-weight: 500; }
